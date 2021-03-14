@@ -1,4 +1,4 @@
-## mmio_16550_uart
+## mmio_sifive_uart
 
 This is a very basic Rust `no_std` crate for reading from and writing to a memory-mapped (MMIO) SiFive Universal Asynchronous Receiver/Transmitter (UART) at the bare-metal level. It is used by the [Diosix](https://diosix.org) project for serial port communication. It is compatible with these [SiFive](https://www.sifive.com/boards) system-on-chips:
 
