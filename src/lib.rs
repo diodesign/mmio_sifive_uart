@@ -50,6 +50,7 @@ const LOOP_MAX: usize = 1000;
 #[derive(Debug)]
 pub enum Fault
 {
+    SizeTooSmall,   /* the size of the MMIO area is unexpectedly small */
     TxNotEmpty,     /* gave up waiting to transmit */
     DataNotReady    /* gave up waiting to send */
 }
@@ -65,8 +66,11 @@ impl UART
     /* create and initialize a standard 8-n-1 UART object, or fail with a reason code.
     this used the previously configured baud rate, which is derived from the
     CPU core speed. the baud should be set separately */
-    pub fn new(base_addr: usize) -> Result<Self, Fault>
+    pub fn new(base_addr: usize, size: usize) -> Result<Self, Fault>
     {
+        /* give up if the available MMIO area is smaller than the register area we need */
+        if REG_TOTAL_SIZE > size { return Err(Fault::SizeTooSmall) }
+
         let uart = UART { base_addr };
 
         /* enable transmission, one stop bit, set tx irq watermark.
@@ -126,38 +130,40 @@ impl UART
     /* centralize reading and writing of registers to these unsafe functions */
     fn write_reg(&self, reg: usize, val: u32)
     {
-        /* assumes reg is in range */
+        /* assumes reg is within MMIO area's range */
         unsafe { write_volatile((self.base_addr + reg) as *mut u32, val) }
     }
 
     fn read_reg(&self, reg: usize) -> u32
     {
-        /* assumes reg is in range */
+        /* assumes reg is within MMIO area's range */
         unsafe { read_volatile((self.base_addr + reg) as *const u32) }
     }
 
     pub fn send_byte(&self, to_send: u8) -> Result<(), Fault>
     {
-        for _ in 0..LOOP_MAX
+
+        let mut result = Err(Fault::TxNotEmpty);
+        let mut attempts_remaining = LOOP_MAX;
+
+        while attempts_remaining > 0
         {
-            if self.is_transmit_full() == false
+            (!self.is_transmit_full()).then(||
             {
                 self.write_reg(REG_TXDATA, to_send as u32);
-                return Ok(());
-            }
+                result = Ok(());
+                attempts_remaining = 0;
+            });
         }
 
-        Err(Fault::TxNotEmpty)
+        result
     }
 
     pub fn read_byte(&self) -> Result<u8, Fault>
     {
-        for _ in 0..LOOP_MAX
+        if !self.is_data_empty()
         {
-            if self.is_data_empty() == false
-            {
-                return Ok((self.read_reg(REG_RXDATA) & 0xff) as u8);
-            }   
+            return Ok((self.read_reg(REG_RXDATA) & 0xff) as u8)
         }
 
         Err(Fault::DataNotReady)
